@@ -1,6 +1,6 @@
 # Overview
 
-This project is a Telegram bot that provides image search functionality using the Pixabay API. The bot allows users to search for images through Telegram commands and handles user management with admin controls. It's built using Python with a combination of the python-telegram-bot library for Telegram integration and Flask for webhook handling.
+This project is a comprehensive Telegram bot that provides image, video, and music search functionality using the Pixabay API. The bot features mandatory channel subscription, admin controls, and user management. Users must subscribe to required channels before using the bot, and can search for various media types with navigation between results. Built using Python with python-telegram-bot library (v20.7) and Flask for webhook handling.
 
 # User Preferences
 
@@ -53,18 +53,35 @@ The application follows a monolithic architecture with the following key compone
 # External Dependencies
 
 ## Core Libraries
-- **python-telegram-bot**: Telegram Bot API wrapper
+- **python-telegram-bot (v20.7)**: Telegram Bot API wrapper with async support
 - **Flask**: Web framework for webhook handling
-- **requests**: HTTP client for API calls
+- **requests**: HTTP client for Pixabay API calls
 - **sqlite3**: Database operations (built-in)
 
 ## Third-party Services
 - **Telegram Bot API**: Message delivery and bot functionality
-- **Pixabay API**: Image search and retrieval service
+- **Pixabay API**: Image, video, and music search service
+
+## Bot Features
+- **Mandatory Channel Subscription**: Users must subscribe to channels before using bot
+- **Multi-media Search**: Support for photos, illustrations, vectors, videos, music, and GIFs
+- **Search Result Navigation**: Previous/next buttons with result selection
+- **Admin Panel**: Complete user and channel management
+- **Statistics Tracking**: User activity and search analytics
+- **Broadcasting**: Admin can send messages to all users
+
+## Admin Features
+- **User Management**: Ban/unban users by ID
+- **Channel Management**: Add/remove mandatory subscription channels
+- **Statistics Dashboard**: View user counts, search statistics
+- **Broadcast Messages**: Send notifications to all active users
 
 ## Configuration
-- **Environment Variables**: Bot token and API keys are hardcoded (should be moved to environment variables)
+- **Bot Token**: 8071576925:AAGgx_Jkuu-mRpjdMKiOQCDkkVQskXQYhQo
+- **Admin ID**: 7251748706
+- **Pixabay API Key**: 51444506-bffefcaf12816bd85a20222d1
 - **Database**: SQLite file stored locally
+- **Default Channel**: @Ili8_8ill (pre-configured)
 
 # Deployment Strategy
 
