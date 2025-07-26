@@ -22,9 +22,9 @@ logging.basicConfig(
 logger = logging.getLogger(__name__)
 
 # Bot configuration
-BOT_TOKEN = "8071576925:AAGgx_Jkuu-mRpjdMKiOQCDkkVQskXQYhQo"
-ADMIN_ID = 7251748706
-PIXABAY_API_KEY = "51444506-bffefcaf12816bd85a20222d1"
+BOT_TOKEN = os.environ.get("BOT_TOKEN", "8071576925:AAGgx_Jkuu-mRpjdMKiOQCDkkVQskXQYhQo")
+ADMIN_ID = int(os.environ.get("ADMIN_ID", "7251748706"))
+PIXABAY_API_KEY = os.environ.get("PIXABAY_API_KEY", "51444506-bffefcaf12816bd85a20222d1")
 PIXABAY_API_URL = "https://pixabay.com/api/"
 
 # Database setup
@@ -809,8 +809,20 @@ app = Flask(__name__)
 def webhook():
     """Handle webhook requests"""
     try:
-        update = Update.de_json(request.get_json(force=True), bot.bot)
-        asyncio.create_task(bot.application.process_update(update))
+        update_data = request.get_json(force=True)
+        if update_data:
+            update = Update.de_json(update_data, bot.bot)
+            # Create event loop if not exists
+            try:
+                loop = asyncio.get_event_loop()
+            except RuntimeError:
+                loop = asyncio.new_event_loop()
+                asyncio.set_event_loop(loop)
+            
+            if loop.is_running():
+                asyncio.create_task(bot.application.process_update(update))
+            else:
+                loop.run_until_complete(bot.application.process_update(update))
         return 'OK'
     except Exception as e:
         logger.error(f"Webhook error: {e}")
@@ -867,7 +879,8 @@ bot = TelegramBot(BOT_TOKEN)
 
 def run_flask():
     """Run Flask server"""
-    app.run(host='0.0.0.0', port=5000, debug=False)
+    port = int(os.environ.get('PORT', 5000))
+    app.run(host='0.0.0.0', port=port, debug=False)
 
 def signal_handler(sig, frame):
     """Handle shutdown signals"""
@@ -880,22 +893,98 @@ async def main():
     signal.signal(signal.SIGINT, signal_handler)
     signal.signal(signal.SIGTERM, signal_handler)
     
-    # Start Flask server in background thread
-    flask_thread = threading.Thread(target=run_flask, daemon=True)
-    flask_thread.start()
+    # Check if we're in webhook mode (Render) or polling mode (Replit)
+    use_webhook = os.environ.get('RENDER_EXTERNAL_URL') or os.environ.get('RAILWAY_STATIC_URL')
     
-    # Set webhook
-    webhook_url = f"https://{os.environ.get('REPL_SLUG', 'workspace')}.replit.app/webhook"
-    await bot.bot.set_webhook(webhook_url)
+    if use_webhook:
+        # Start Flask server in background thread for webhook mode
+        flask_thread = threading.Thread(target=run_flask, daemon=True)
+        flask_thread.start()
+        
+        # Wait a bit for Flask to start
+        await asyncio.sleep(2)
+        
+        # Set webhook with retry logic
+        webhook_url = f"https://{os.environ.get('RENDER_EXTERNAL_URL', os.environ.get('RAILWAY_STATIC_URL', os.environ.get('REPL_SLUG', 'workspace') + '.replit.app'))}/webhook"
+        
+        max_retries = 3
+        for attempt in range(max_retries):
+            try:
+                await bot.bot.set_webhook(webhook_url)
+                logger.info(f"Bot started in webhook mode. Webhook URL: {webhook_url}")
+                break
+            except Exception as e:
+                if attempt < max_retries - 1:
+                    logger.warning(f"Webhook setup attempt {attempt + 1} failed: {e}. Retrying in 5 seconds...")
+                    await asyncio.sleep(5)
+                else:
+                    logger.error(f"Failed to set webhook after {max_retries} attempts: {e}")
+                    logger.info("Falling back to polling mode...")
+                    use_webhook = False
+                    break
+        
+        if use_webhook:
+            # Keep the main thread alive for webhook mode
+            try:
+                while True:
+                    await asyncio.sleep(10)
+            except KeyboardInterrupt:
+                logger.info("Bot stopped")
+                return
     
-    logger.info(f"Bot started. Webhook URL: {webhook_url}")
-    
-    # Keep the main thread alive
+    # Polling mode fallback
+    logger.info("Starting bot in polling mode...")
     try:
+        # Delete webhook first
+        await bot.bot.delete_webhook()
+        # Start Flask server for health checks
+        flask_thread = threading.Thread(target=run_flask, daemon=True)
+        flask_thread.start()
+        logger.info("Flask server started for health checks")
+        
+        # Initialize bot and application properly
+        await bot.bot.initialize()
+        await bot.application.initialize()
+        await bot.application.start()
+        
+        logger.info("Bot polling started successfully")
+        
+        # Start polling for updates
         while True:
-            await asyncio.sleep(1)
+            try:
+                updates = await bot.bot.get_updates(
+                    offset=getattr(bot, '_last_update_id', 0) + 1,
+                    timeout=30
+                )
+                
+                for update in updates:
+                    bot._last_update_id = update.update_id
+                    try:
+                        await bot.application.process_update(update)
+                    except Exception as e:
+                        logger.error(f"Error processing update {update.update_id}: {e}")
+                
+                if not updates:
+                    await asyncio.sleep(1)
+                    
+            except Exception as e:
+                logger.error(f"Error in polling loop: {e}")
+                await asyncio.sleep(5)
+                
     except KeyboardInterrupt:
-        logger.info("Bot stopped")
+        logger.info("Bot stopped by user")
+    except Exception as e:
+        logger.error(f"Critical error in polling mode: {e}")
+        # Start Flask server anyway for health checks
+        flask_thread = threading.Thread(target=run_flask, daemon=True)
+        flask_thread.start()
+        
+        # Keep alive
+        try:
+            while True:
+                await asyncio.sleep(10)
+        except KeyboardInterrupt:
+            logger.info("Bot stopped")
 
 if __name__ == '__main__':
     # Add default mandatory channel
