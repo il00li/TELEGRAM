@@ -1149,41 +1149,14 @@ async def main():
     signal.signal(signal.SIGINT, signal_handler)
     signal.signal(signal.SIGTERM, signal_handler)
     
-    # Set webhook manually if specified
-    manual_webhook = "https://telegram-oihp.onrender.com/webhook"
-    if manual_webhook:
-        logger.info(f"Setting manual webhook: {manual_webhook}")
-        success = await set_webhook_manually(manual_webhook)
-        if success:
-            # Start Flask server for webhook handling
-            flask_thread = threading.Thread(target=run_flask, daemon=True)
-            flask_thread.start()
-            
-            await bot.application.start()
-            logger.info("🚀 Bot started successfully in webhook mode")
-            
-            # Keep the main thread alive for webhook mode
-            try:
-                while True:
-                    await asyncio.sleep(30)
-                    # Health check
-                    try:
-                        me = await bot.bot.get_me()
-                        logger.info(f"Bot health check: @{me.username} is alive")
-                    except Exception as e:
-                        logger.error(f"Bot health check failed: {e}")
-            except KeyboardInterrupt:
-                logger.info("Bot stopped by user")
-                await bot.application.stop()
-                return
+    # Check if we're on Render (production) or local development
+    render_url = os.environ.get('RENDER_EXTERNAL_URL')
     
-    # Check if we're in webhook mode (production deployment)
-    render_url = os.environ.get('RENDER_EXTERNAL_URL') or "telegram-oihp.onrender.com"
-    
-    use_webhook = bool(render_url)
-    
-    if use_webhook:
-        # Production webhook mode
+    if render_url:
+        # Production webhook mode on Render
+        logger.info("Starting bot in webhook mode for Render deployment")
+        
+        # Start Flask server for webhook handling
         flask_thread = threading.Thread(target=run_flask, daemon=True)
         flask_thread.start()
         
@@ -1223,10 +1196,10 @@ async def main():
                 else:
                     logger.error(f"Failed to set webhook after {max_retries} attempts: {e}")
                     logger.info("Falling back to polling mode...")
-                    use_webhook = False
+                    render_url = None
                     break
         
-        if use_webhook:
+        if render_url:
             await bot.application.start()
             logger.info("🚀 Bot started successfully in webhook mode")
             
@@ -1245,7 +1218,7 @@ async def main():
                 await bot.application.stop()
                 return
     
-    # Polling mode fallback
+    # Local development or fallback polling mode
     logger.info("Starting bot in polling mode...")
     try:
         # Delete webhook first
