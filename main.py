@@ -306,6 +306,9 @@ class TelegramBot:
     
     def setup_handlers(self):
         """Setup command and callback handlers"""
+        # Add error handler
+        self.application.add_error_handler(self.error_handler)
+        
         # Command handlers
         self.application.add_handler(CommandHandler("start", self.start_command))
         self.application.add_handler(CommandHandler("admin", self.admin_command))
@@ -450,7 +453,12 @@ class TelegramBot:
         data = query.data
         user_id = update.effective_user.id
         
-        await query.answer()
+        # Handle callback query answer with error handling
+        try:
+            await query.answer()
+        except Exception as e:
+            logger.warning(f"Failed to answer callback query: {e}")
+            # Continue processing even if answer fails
         
         # Check if user is banned
         if db.is_user_banned(user_id):
@@ -630,6 +638,25 @@ class TelegramBot:
             
             await update.callback_query.edit_message_text(text=fallback_text)
     
+    async def error_handler(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
+        """Handle errors"""
+        logger.error(f"Exception while handling an update: {context.error}")
+        
+        # Handle specific callback query errors
+        if "Query is too old" in str(context.error) or "query id is invalid" in str(context.error):
+            logger.info("Callback query timeout - ignoring old query")
+            return
+        
+        # For other errors, try to send a message to the user if possible
+        try:
+            if update and update.effective_chat:
+                await context.bot.send_message(
+                    chat_id=update.effective_chat.id,
+                    text="حدث خطأ مؤقت. حاول مرة أخرى."
+                )
+        except Exception as e:
+            logger.error(f"Failed to send error message: {e}")
+
     async def handle_message(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
         """Handle text messages"""
         if not update.message or not update.message.text:
@@ -1114,6 +1141,7 @@ async def main():
                         await bot.application.process_update(update)
                     except Exception as e:
                         logger.error(f"Error processing update {update.update_id}: {e}")
+                        # Continue processing other updates
                 
                 if not updates:
                     await asyncio.sleep(1)
