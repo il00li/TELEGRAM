@@ -1,3 +1,4 @@
+
 import logging
 import sqlite3
 import asyncio
@@ -980,7 +981,10 @@ class TelegramBot:
             await update.message.reply_text(f"✅ تم إرسال الرسالة لـ {success_count} مستخدم")
             context.user_data.pop("admin_action", None)
 
-# Flask webhook server
+# Initialize bot
+bot = TelegramBot(BOT_TOKEN)
+
+# Flask webhook server for Render deployment only
 app = Flask(__name__)
 
 @app.route('/webhook', methods=['POST'])
@@ -1021,7 +1025,7 @@ def webhook():
 
 @app.route('/', methods=['GET'])
 def home():
-    """Home page"""
+    """Home page for Render deployment"""
     return '''
     <!DOCTYPE html>
     <html>
@@ -1068,49 +1072,8 @@ def health():
     """Health check endpoint"""
     return 'OK'
 
-@app.route('/webhook-info', methods=['GET'])
-def webhook_info():
-    """Get webhook information"""
-    try:
-        import asyncio
-        
-        async def get_webhook_info():
-            try:
-                info = await bot.bot.get_webhook_info()
-                return {
-                    'webhook_url': info.url,
-                    'has_custom_certificate': info.has_custom_certificate,
-                    'pending_update_count': info.pending_update_count,
-                    'last_error_date': info.last_error_date.isoformat() if info.last_error_date else None,
-                    'last_error_message': info.last_error_message,
-                    'max_connections': info.max_connections,
-                    'allowed_updates': info.allowed_updates
-                }
-            except Exception as e:
-                return {'error': str(e)}
-        
-        # Run in event loop
-        try:
-            loop = asyncio.get_event_loop()
-        except RuntimeError:
-            loop = asyncio.new_event_loop()
-            asyncio.set_event_loop(loop)
-        
-        if loop.is_running():
-            # If loop is running, we can't use run_until_complete
-            return {'status': 'loop_running', 'message': 'Cannot get webhook info while loop is running'}
-        else:
-            result = loop.run_until_complete(get_webhook_info())
-            return result
-            
-    except Exception as e:
-        return {'error': str(e)}
-
-# Initialize bot
-bot = TelegramBot(BOT_TOKEN)
-
 def run_flask():
-    """Run Flask server"""
+    """Run Flask server for Render"""
     port = int(os.environ.get('PORT', 5000))
     app.run(host='0.0.0.0', port=port, debug=False)
 
@@ -1119,55 +1082,29 @@ def signal_handler(sig, frame):
     logger.info('Shutting down bot...')
     sys.exit(0)
 
-async def set_webhook_manually(webhook_url: str):
-    """Set webhook manually"""
-    try:
-        await bot.bot.initialize()
-        await bot.application.initialize()
-        
-        # Delete existing webhook first
-        await bot.bot.delete_webhook()
-        await asyncio.sleep(1)
-        
-        # Set new webhook
-        result = await bot.bot.set_webhook(
-            url=webhook_url,
-            allowed_updates=["message", "callback_query", "inline_query"]
-        )
-        
-        if result:
-            logger.info(f"✅ Webhook set successfully: {webhook_url}")
-            return True
-        else:
-            logger.error(f"❌ Failed to set webhook: {webhook_url}")
-            return False
-            
-    except Exception as e:
-        logger.error(f"Error setting webhook: {e}")
-        return False
-
 async def main():
-    """Main function - Render deployment only"""
+    """Main function - Render deployment ONLY"""
     # Set up signal handlers
     signal.signal(signal.SIGINT, signal_handler)
     signal.signal(signal.SIGTERM, signal_handler)
     
-    # Force Render webhook mode only
-    logger.info("Starting bot in webhook mode for Render deployment")
+    logger.info("🚀 Starting Pixabay Bot - Render Deployment")
     
     # Start Flask server for webhook handling
     flask_thread = threading.Thread(target=run_flask, daemon=True)
     flask_thread.start()
+    logger.info("🌐 Flask webhook server started")
     
     # Wait for Flask to start
     await asyncio.sleep(3)
     
-    # Use the hardcoded Render webhook URL
-    webhook_url = "https://telegram-oihp.onrender.com/webhook"
-    
-    # Initialize bot first
+    # Initialize bot
     await bot.bot.initialize()
     await bot.application.initialize()
+    logger.info("🤖 Bot initialized")
+    
+    # Set webhook for Render deployment
+    webhook_url = "https://telegram-oihp.onrender.com/webhook"
     
     max_retries = 5
     for attempt in range(max_retries):
@@ -1179,7 +1116,7 @@ async def main():
             # Set new webhook
             result = await bot.bot.set_webhook(
                 url=webhook_url,
-                allowed_updates=["message", "callback_query", "inline_query"]
+                allowed_updates=["message", "callback_query"]
             )
             
             if result:
