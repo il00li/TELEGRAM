@@ -1116,14 +1116,69 @@ def signal_handler(sig, frame):
     logger.info('Shutting down bot...')
     sys.exit(0)
 
+async def set_webhook_manually(webhook_url: str):
+    """Set webhook manually"""
+    try:
+        await bot.bot.initialize()
+        await bot.application.initialize()
+        
+        # Delete existing webhook first
+        await bot.bot.delete_webhook()
+        await asyncio.sleep(1)
+        
+        # Set new webhook
+        result = await bot.bot.set_webhook(
+            url=webhook_url,
+            allowed_updates=["message", "callback_query", "inline_query"]
+        )
+        
+        if result:
+            logger.info(f"✅ Webhook set successfully: {webhook_url}")
+            return True
+        else:
+            logger.error(f"❌ Failed to set webhook: {webhook_url}")
+            return False
+            
+    except Exception as e:
+        logger.error(f"Error setting webhook: {e}")
+        return False
+
 async def main():
     """Main function"""
     # Set up signal handlers
     signal.signal(signal.SIGINT, signal_handler)
     signal.signal(signal.SIGTERM, signal_handler)
     
+    # Set webhook manually if specified
+    manual_webhook = "https://telegram-oihp.onrender.com/webhook"
+    if manual_webhook:
+        logger.info(f"Setting manual webhook: {manual_webhook}")
+        success = await set_webhook_manually(manual_webhook)
+        if success:
+            # Start Flask server for webhook handling
+            flask_thread = threading.Thread(target=run_flask, daemon=True)
+            flask_thread.start()
+            
+            await bot.application.start()
+            logger.info("🚀 Bot started successfully in webhook mode")
+            
+            # Keep the main thread alive for webhook mode
+            try:
+                while True:
+                    await asyncio.sleep(30)
+                    # Health check
+                    try:
+                        me = await bot.bot.get_me()
+                        logger.info(f"Bot health check: @{me.username} is alive")
+                    except Exception as e:
+                        logger.error(f"Bot health check failed: {e}")
+            except KeyboardInterrupt:
+                logger.info("Bot stopped by user")
+                await bot.application.stop()
+                return
+    
     # Check if we're in webhook mode (production deployment)
-    render_url = os.environ.get('RENDER_EXTERNAL_URL')
+    render_url = os.environ.get('RENDER_EXTERNAL_URL') or "telegram-oihp.onrender.com"
     railway_url = os.environ.get('RAILWAY_STATIC_URL')
     replit_url = os.environ.get('REPL_SLUG')
     
