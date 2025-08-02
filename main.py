@@ -988,20 +988,33 @@ def webhook():
     """Handle webhook requests"""
     try:
         update_data = request.get_json(force=True)
-        if update_data:
-            update = Update.de_json(update_data, bot.bot)
-            # Create event loop if not exists
-            try:
-                loop = asyncio.get_event_loop()
-            except RuntimeError:
-                loop = asyncio.new_event_loop()
-                asyncio.set_event_loop(loop)
+        if not update_data:
+            logger.warning("Received empty webhook data")
+            return 'OK'
             
-            if loop.is_running():
-                asyncio.create_task(bot.application.process_update(update))
-            else:
-                loop.run_until_complete(bot.application.process_update(update))
-        return 'OK'
+        logger.info(f"Received webhook update: {update_data.get('update_id', 'unknown')}")
+        
+        try:
+            update = Update.de_json(update_data, bot.bot)
+            if update:
+                # Handle the update in a new thread to avoid blocking
+                def process_update():
+                    try:
+                        loop = asyncio.new_event_loop()
+                        asyncio.set_event_loop(loop)
+                        loop.run_until_complete(bot.application.process_update(update))
+                        loop.close()
+                    except Exception as e:
+                        logger.error(f"Error processing update in thread: {e}")
+                
+                thread = threading.Thread(target=process_update, daemon=True)
+                thread.start()
+                
+        except Exception as e:
+            logger.error(f"Error creating update object: {e}")
+            
+        return 'OK', 200
+        
     except Exception as e:
         logger.error(f"Webhook error: {e}")
         return 'Error', 500
@@ -1052,6 +1065,44 @@ def health():
     """Health check endpoint"""
     return 'OK'
 
+@app.route('/webhook-info', methods=['GET'])
+def webhook_info():
+    """Get webhook information"""
+    try:
+        import asyncio
+        
+        async def get_webhook_info():
+            try:
+                info = await bot.bot.get_webhook_info()
+                return {
+                    'webhook_url': info.url,
+                    'has_custom_certificate': info.has_custom_certificate,
+                    'pending_update_count': info.pending_update_count,
+                    'last_error_date': info.last_error_date.isoformat() if info.last_error_date else None,
+                    'last_error_message': info.last_error_message,
+                    'max_connections': info.max_connections,
+                    'allowed_updates': info.allowed_updates
+                }
+            except Exception as e:
+                return {'error': str(e)}
+        
+        # Run in event loop
+        try:
+            loop = asyncio.get_event_loop()
+        except RuntimeError:
+            loop = asyncio.new_event_loop()
+            asyncio.set_event_loop(loop)
+        
+        if loop.is_running():
+            # If loop is running, we can't use run_until_complete
+            return {'status': 'loop_running', 'message': 'Cannot get webhook info while loop is running'}
+        else:
+            result = loop.run_until_complete(get_webhook_info())
+            return result
+            
+    except Exception as e:
+        return {'error': str(e)}
+
 # Initialize bot
 bot = TelegramBot(BOT_TOKEN)
 
@@ -1071,30 +1122,56 @@ async def main():
     signal.signal(signal.SIGINT, signal_handler)
     signal.signal(signal.SIGTERM, signal_handler)
     
-    # Check if we're in webhook mode (Render) or polling mode (Replit)
-    use_webhook = os.environ.get('RENDER_EXTERNAL_URL') or os.environ.get('RAILWAY_STATIC_URL')
+    # Check if we're in webhook mode (production deployment)
+    render_url = os.environ.get('RENDER_EXTERNAL_URL')
+    railway_url = os.environ.get('RAILWAY_STATIC_URL')
+    replit_url = os.environ.get('REPL_SLUG')
+    
+    use_webhook = bool(render_url or railway_url)
     
     if use_webhook:
-        # Start Flask server in background thread for webhook mode
+        # Production webhook mode
         flask_thread = threading.Thread(target=run_flask, daemon=True)
         flask_thread.start()
         
-        # Wait a bit for Flask to start
-        await asyncio.sleep(2)
+        # Wait for Flask to start
+        await asyncio.sleep(3)
         
-        # Set webhook with retry logic
-        webhook_url = f"https://{os.environ.get('RENDER_EXTERNAL_URL', os.environ.get('RAILWAY_STATIC_URL', os.environ.get('REPL_SLUG', 'workspace') + '.replit.app'))}/webhook"
+        # Determine the correct webhook URL
+        if render_url:
+            webhook_url = f"https://{render_url}/webhook"
+        elif railway_url:
+            webhook_url = f"https://{railway_url}/webhook"
+        else:
+            webhook_url = f"https://{replit_url}.replit.app/webhook"
         
-        max_retries = 3
+        # Initialize bot first
+        await bot.bot.initialize()
+        await bot.application.initialize()
+        
+        max_retries = 5
         for attempt in range(max_retries):
             try:
-                await bot.bot.set_webhook(webhook_url)
-                logger.info(f"Bot started in webhook mode. Webhook URL: {webhook_url}")
-                break
+                # Delete existing webhook first
+                await bot.bot.delete_webhook()
+                await asyncio.sleep(1)
+                
+                # Set new webhook
+                result = await bot.bot.set_webhook(
+                    url=webhook_url,
+                    allowed_updates=["message", "callback_query", "inline_query"]
+                )
+                
+                if result:
+                    logger.info(f"✅ Webhook set successfully: {webhook_url}")
+                    break
+                else:
+                    logger.error(f"❌ Failed to set webhook: {webhook_url}")
+                    
             except Exception as e:
                 if attempt < max_retries - 1:
-                    logger.warning(f"Webhook setup attempt {attempt + 1} failed: {e}. Retrying in 5 seconds...")
-                    await asyncio.sleep(5)
+                    logger.warning(f"Webhook setup attempt {attempt + 1} failed: {e}. Retrying in 10 seconds...")
+                    await asyncio.sleep(10)
                 else:
                     logger.error(f"Failed to set webhook after {max_retries} attempts: {e}")
                     logger.info("Falling back to polling mode...")
@@ -1102,12 +1179,22 @@ async def main():
                     break
         
         if use_webhook:
+            await bot.application.start()
+            logger.info("🚀 Bot started successfully in webhook mode")
+            
             # Keep the main thread alive for webhook mode
             try:
                 while True:
-                    await asyncio.sleep(10)
+                    await asyncio.sleep(30)
+                    # Health check
+                    try:
+                        me = await bot.bot.get_me()
+                        logger.info(f"Bot health check: @{me.username} is alive")
+                    except Exception as e:
+                        logger.error(f"Bot health check failed: {e}")
             except KeyboardInterrupt:
-                logger.info("Bot stopped")
+                logger.info("Bot stopped by user")
+                await bot.application.stop()
                 return
     
     # Polling mode fallback
