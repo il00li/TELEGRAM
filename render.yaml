@@ -9,11 +9,11 @@ services:
       - key: PYTHON_VERSION
         value: 3.11.9
       - key: BOT_TOKEN
-        sync: false
+        value: 8071576925:AAGgx_Jkuu-mRpjdMKiOQCDkkVQskXQYhQo
       - key: ADMIN_ID
-        sync: false
+        value: 7251748706
       - key: PIXABAY_API_KEY
-        sync: false
+        value: 51444506-bffefcaf12816bd85a20222d1
     healthCheckPath: /health
     numInstances: 1
     plan: free

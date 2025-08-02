@@ -1149,12 +1149,14 @@ async def main():
     signal.signal(signal.SIGINT, signal_handler)
     signal.signal(signal.SIGTERM, signal_handler)
     
-    # Check if we're on Render (production) or local development
+    # Check if we're on Render or other cloud platform
     render_url = os.environ.get('RENDER_EXTERNAL_URL')
+    port = os.environ.get('PORT')
     
-    if render_url:
-        # Production webhook mode on Render
-        logger.info("Starting bot in webhook mode for Render deployment")
+    # If PORT is set, we're likely on a cloud platform like Render
+    if port:
+        # Production webhook mode on cloud platform
+        logger.info("Starting bot in webhook mode for cloud deployment")
         
         # Start Flask server for webhook handling
         flask_thread = threading.Thread(target=run_flask, daemon=True)
@@ -1163,8 +1165,8 @@ async def main():
         # Wait for Flask to start
         await asyncio.sleep(3)
         
-        # Use Render webhook URL
-        webhook_url = f"https://{render_url}/webhook"
+        # Use the configured webhook URL
+        webhook_url = "https://telegram-oihp.onrender.com/webhook"
         
         # Initialize bot first
         await bot.bot.initialize()
@@ -1196,10 +1198,10 @@ async def main():
                 else:
                     logger.error(f"Failed to set webhook after {max_retries} attempts: {e}")
                     logger.info("Falling back to polling mode...")
-                    render_url = None
+                    port = None
                     break
         
-        if render_url:
+        if port:
             await bot.application.start()
             logger.info("🚀 Bot started successfully in webhook mode")
             
