@@ -1126,4 +1126,5 @@ if __name__ == '__main__':
         asyncio.run(main())
     else:
         print("❌ هذا البوت مخصص للعمل على Render.com فقط")
-        print("❌ يرجى نشر البوت على Render.com لاستخدامه")
+        print("❌ يرجى نشر البوت على Render.com لاستخدامه") 
+``'
