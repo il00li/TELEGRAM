@@ -550,18 +550,85 @@ class TelegramBot:
         results = json.loads(session["results"])
         current_index = session["index"]
         result = results[current_index]
+        search_type = session.get("type", "photo")
         
-        # Remove keyboard and keep only the selected result
-        if session["type"] in ["video", "music"]:
-            caption = f"🎬 {result.get('tags', 'فيديو')}"
-            await update.callback_query.edit_message_text(
-                text=f"تم اختيار: {caption}\n{result.get('webformatURL', result.get('videos', {}).get('medium', {}).get('url', ''))}"
-            )
-        else:
-            caption = f"🖼️ {result.get('tags', 'صورة')}"
-            await update.callback_query.edit_message_text(
-                text=f"تم اختيار: {caption}\n{result.get('webformatURL', '')}"
-            )
+        # Prepare final caption
+        final_caption = f"✅ تم الاختيار\n🏷️ {result.get('tags', 'غير محدد')}"
+        
+        chat_id = update.callback_query.message.chat_id
+        
+        try:
+            # Delete the message with navigation buttons
+            await update.callback_query.message.delete()
+            
+            # Send the selected media without navigation buttons
+            if search_type == "video" and result.get('videos'):
+                video_url = result['videos'].get('medium', {}).get('url', '')
+                if video_url:
+                    await self.bot.send_video(
+                        chat_id=chat_id,
+                        video=video_url,
+                        caption=final_caption
+                    )
+                else:
+                    await self.bot.send_message(
+                        chat_id=chat_id,
+                        text=f"{final_caption}\n❌ فيديو غير متوفر"
+                    )
+            elif search_type == "music":
+                music_url = result.get('previewURL') or result.get('webformatURL', '')
+                if music_url:
+                    await self.bot.send_audio(
+                        chat_id=chat_id,
+                        audio=music_url,
+                        caption=final_caption
+                    )
+                else:
+                    await self.bot.send_message(
+                        chat_id=chat_id,
+                        text=f"{final_caption}\n🎵 موسيقى غير متوفرة للتشغيل"
+                    )
+            elif search_type == "gif":
+                gif_url = result.get('webformatURL', '')
+                if gif_url and gif_url.lower().endswith('.gif'):
+                    await self.bot.send_animation(
+                        chat_id=chat_id,
+                        animation=gif_url,
+                        caption=final_caption
+                    )
+                else:
+                    await self.bot.send_photo(
+                        chat_id=chat_id,
+                        photo=gif_url,
+                        caption=final_caption
+                    )
+            else:
+                # For photos, illustrations, vectors
+                photo_url = result.get('webformatURL', '')
+                if photo_url:
+                    await self.bot.send_photo(
+                        chat_id=chat_id,
+                        photo=photo_url,
+                        caption=final_caption
+                    )
+                else:
+                    await self.bot.send_message(
+                        chat_id=chat_id,
+                        text=f"{final_caption}\n❌ صورة غير متوفرة"
+                    )
+                    
+        except Exception as e:
+            logger.error(f"Error sending selected media: {e}")
+            # Fallback to editing the message
+            fallback_text = f"{final_caption}\n"
+            if result.get('webformatURL'):
+                fallback_text += f"🔗 {result['webformatURL']}"
+            elif result.get('videos'):
+                video_url = result['videos'].get('medium', {}).get('url', '')
+                if video_url:
+                    fallback_text += f"🎬 {video_url}"
+            
+            await update.callback_query.edit_message_text(text=fallback_text)
     
     async def handle_message(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
         """Handle text messages"""
@@ -631,30 +698,114 @@ class TelegramBot:
         
         reply_markup = InlineKeyboardMarkup(keyboard)
         
-        # Prepare result text
-        result_text = f"النتيجة {index + 1} من {len(results)}\n"
-        result_text += f"🏷️ {result.get('tags', 'غير محدد')}\n"
+        # Prepare caption text
+        caption_text = f"النتيجة {index + 1} من {len(results)}\n"
+        caption_text += f"🏷️ {result.get('tags', 'غير محدد')}"
         
-        if result.get('webformatURL'):
-            result_text += f"🔗 {result['webformatURL']}"
-        elif result.get('videos'):
-            video_url = result['videos'].get('medium', {}).get('url', '')
-            if video_url:
-                result_text += f"🎬 {video_url}"
+        # Get the current session to determine search type
+        user_id = update.effective_user.id
+        session = db.get_user_session(user_id)
+        search_type = session.get("type", "photo") if session else "photo"
         
+        # Determine chat context
         if edit_message and update.callback_query:
-            await update.callback_query.edit_message_text(
-                text=result_text,
-                reply_markup=reply_markup
-            )
+            chat_id = update.callback_query.message.chat_id
+            message_id = update.callback_query.message.message_id
         elif message:
-            await message.edit_text(
-                text=result_text,
-                reply_markup=reply_markup
-            )
+            chat_id = message.chat_id
+            message_id = message.message_id
         else:
-            await update.message.reply_text(
-                text=result_text,
+            chat_id = update.message.chat_id
+            message_id = None
+        
+        try:
+            # Delete the old message if it exists
+            if edit_message and update.callback_query:
+                await update.callback_query.message.delete()
+            elif message:
+                await message.delete()
+            
+            # Send media based on type
+            if search_type == "video" and result.get('videos'):
+                video_url = result['videos'].get('medium', {}).get('url', '')
+                if video_url:
+                    await self.bot.send_video(
+                        chat_id=chat_id,
+                        video=video_url,
+                        caption=caption_text,
+                        reply_markup=reply_markup
+                    )
+                else:
+                    await self.bot.send_message(
+                        chat_id=chat_id,
+                        text=f"{caption_text}\n❌ فيديو غير متوفر",
+                        reply_markup=reply_markup
+                    )
+            elif search_type == "music":
+                # For music, send as audio if available, otherwise show info
+                music_url = result.get('previewURL') or result.get('webformatURL', '')
+                if music_url:
+                    await self.bot.send_audio(
+                        chat_id=chat_id,
+                        audio=music_url,
+                        caption=caption_text,
+                        reply_markup=reply_markup
+                    )
+                else:
+                    await self.bot.send_message(
+                        chat_id=chat_id,
+                        text=f"{caption_text}\n🎵 موسيقى غير متوفرة للتشغيل",
+                        reply_markup=reply_markup
+                    )
+            elif search_type == "gif":
+                # For GIFs, try to send as animation
+                gif_url = result.get('webformatURL', '')
+                if gif_url and gif_url.lower().endswith('.gif'):
+                    await self.bot.send_animation(
+                        chat_id=chat_id,
+                        animation=gif_url,
+                        caption=caption_text,
+                        reply_markup=reply_markup
+                    )
+                else:
+                    # Fallback to photo if not a proper GIF
+                    await self.bot.send_photo(
+                        chat_id=chat_id,
+                        photo=gif_url,
+                        caption=caption_text,
+                        reply_markup=reply_markup
+                    )
+            else:
+                # For photos, illustrations, vectors
+                photo_url = result.get('webformatURL', '')
+                if photo_url:
+                    await self.bot.send_photo(
+                        chat_id=chat_id,
+                        photo=photo_url,
+                        caption=caption_text,
+                        reply_markup=reply_markup
+                    )
+                else:
+                    await self.bot.send_message(
+                        chat_id=chat_id,
+                        text=f"{caption_text}\n❌ صورة غير متوفرة",
+                        reply_markup=reply_markup
+                    )
+                    
+        except Exception as e:
+            logger.error(f"Error sending media: {e}")
+            # Fallback to text message with URL
+            fallback_text = f"{caption_text}\n"
+            if result.get('webformatURL'):
+                fallback_text += f"🔗 {result['webformatURL']}"
+            elif result.get('videos'):
+                video_url = result['videos'].get('medium', {}).get('url', '')
+                if video_url:
+                    fallback_text += f"🎬 {video_url}"
+            
+            await self.bot.send_message(
+                chat_id=chat_id,
+                text=fallback_text,
                 reply_markup=reply_markup
             )
     
