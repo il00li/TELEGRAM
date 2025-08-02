@@ -984,119 +984,20 @@ class TelegramBot:
 # Initialize bot
 bot = TelegramBot(BOT_TOKEN)
 
-# Flask webhook server for Render deployment only
-app = Flask(__name__)
-
-@app.route('/webhook', methods=['POST'])
-def webhook():
-    """Handle webhook requests"""
-    try:
-        update_data = request.get_json(force=True)
-        if not update_data:
-            logger.warning("Received empty webhook data")
-            return 'OK'
-            
-        logger.info(f"Received webhook update: {update_data.get('update_id', 'unknown')}")
-        
-        try:
-            update = Update.de_json(update_data, bot.bot)
-            if update:
-                # Handle the update in a new thread to avoid blocking
-                def process_update():
-                    try:
-                        loop = asyncio.new_event_loop()
-                        asyncio.set_event_loop(loop)
-                        loop.run_until_complete(bot.application.process_update(update))
-                        loop.close()
-                    except Exception as e:
-                        logger.error(f"Error processing update in thread: {e}")
-                
-                thread = threading.Thread(target=process_update, daemon=True)
-                thread.start()
-                
-        except Exception as e:
-            logger.error(f"Error creating update object: {e}")
-            
-        return 'OK', 200
-        
-    except Exception as e:
-        logger.error(f"Webhook error: {e}")
-        return 'Error', 500
-
-@app.route('/', methods=['GET'])
-def home():
-    """Home page for Render deployment"""
-    return '''
-    <!DOCTYPE html>
-    <html>
-    <head>
-        <title>Pixabay Search Bot - Render Deployment</title>
-        <meta charset="UTF-8">
-        <style>
-            body { font-family: Arial, sans-serif; text-align: center; padding: 50px; background: #f0f2f5; }
-            .container { max-width: 600px; margin: 0 auto; background: white; padding: 30px; border-radius: 10px; box-shadow: 0 2px 10px rgba(0,0,0,0.1); }
-            h1 { color: #2c3e50; }
-            .ascii { font-family: monospace; white-space: pre; margin: 20px 0; }
-            .feature { margin: 10px 0; padding: 10px; background: #ecf0f1; border-radius: 5px; }
-            .status { color: #27ae60; font-weight: bold; }
-            .platform { color: #8e44ad; font-weight: bold; margin: 10px 0; }
-        </style>
-    </head>
-    <body>
-        <div class="container">
-            <h1>🤖 Pixabay Search Bot</h1>
-            <div class="ascii">   (•_•)  
-  <)   )╯  
-   /   \\  
-🎧 | Bot is Running on Render!</div>
-            
-            <div class="status">✅ Bot Status: Online</div>
-            <div class="platform">🚀 Deployed on Render.com</div>
-            <div class="platform">🔗 Webhook: https://telegram-oihp.onrender.com/webhook</div>
-            
-            <h3>Features:</h3>
-            <div class="feature">🔍 Multi-media Search (Photos, Videos, Music, GIFs)</div>
-            <div class="feature">📢 Mandatory Channel Subscription</div>
-            <div class="feature">⬅️➡️ Navigate Between Results</div>
-            <div class="feature">🔧 Admin Panel (Ban/Unban, Statistics, Broadcasting)</div>
-            <div class="feature">📊 User Analytics & Search Tracking</div>
-            
-            <p>Find the bot on Telegram and send <code>/start</code> to begin!</p>
-        </div>
-    </body>
-    </html>
-    '''
-
-@app.route('/health', methods=['GET'])
-def health():
-    """Health check endpoint"""
-    return 'OK'
-
-def run_flask():
-    """Run Flask server for Render"""
-    port = int(os.environ.get('PORT', 5000))
-    app.run(host='0.0.0.0', port=port, debug=False)
-
-def signal_handler(sig, frame):
-    """Handle shutdown signals"""
-    logger.info('Shutting down bot...')
-    sys.exit(0)
+# Check if we're running on Render (webhook mode only)
+def is_render_environment():
+    """Check if running on Render platform"""
+    return os.environ.get('RENDER_EXTERNAL_URL') is not None or os.environ.get('RENDER') is not None
 
 async def main():
-    """Main function - Render deployment ONLY"""
-    # Set up signal handlers
-    signal.signal(signal.SIGINT, signal_handler)
-    signal.signal(signal.SIGTERM, signal_handler)
+    """Main function - Render webhook mode only"""
+    logger.info("🚀 Starting Pixabay Bot - Render Deployment Only")
     
-    logger.info("🚀 Starting Pixabay Bot - Render Deployment")
-    
-    # Start Flask server for webhook handling
-    flask_thread = threading.Thread(target=run_flask, daemon=True)
-    flask_thread.start()
-    logger.info("🌐 Flask webhook server started")
-    
-    # Wait for Flask to start
-    await asyncio.sleep(3)
+    # Only proceed if we're on Render
+    if not is_render_environment():
+        logger.error("❌ This bot is configured to run only on Render.com")
+        logger.error("❌ Please deploy this bot to Render.com to use it")
+        return
     
     # Initialize bot
     await bot.bot.initialize()
@@ -1106,49 +1007,124 @@ async def main():
     # Set webhook for Render deployment
     webhook_url = "https://telegram-oihp.onrender.com/webhook"
     
-    max_retries = 5
-    for attempt in range(max_retries):
-        try:
-            # Delete existing webhook first
-            await bot.bot.delete_webhook()
-            await asyncio.sleep(1)
+    try:
+        # Delete existing webhook first
+        await bot.bot.delete_webhook()
+        await asyncio.sleep(1)
+        
+        # Set new webhook
+        result = await bot.bot.set_webhook(
+            url=webhook_url,
+            allowed_updates=["message", "callback_query"]
+        )
+        
+        if result:
+            logger.info(f"✅ Webhook set successfully: {webhook_url}")
+        else:
+            logger.error(f"❌ Failed to set webhook: {webhook_url}")
             
-            # Set new webhook
-            result = await bot.bot.set_webhook(
-                url=webhook_url,
-                allowed_updates=["message", "callback_query"]
-            )
-            
-            if result:
-                logger.info(f"✅ Webhook set successfully: {webhook_url}")
-                break
-            else:
-                logger.error(f"❌ Failed to set webhook: {webhook_url}")
-                
-        except Exception as e:
-            if attempt < max_retries - 1:
-                logger.warning(f"Webhook setup attempt {attempt + 1} failed: {e}. Retrying in 10 seconds...")
-                await asyncio.sleep(10)
-            else:
-                logger.error(f"Failed to set webhook after {max_retries} attempts: {e}")
-                break
+    except Exception as e:
+        logger.error(f"Failed to set webhook: {e}")
     
     await bot.application.start()
     logger.info("🚀 Bot started successfully in webhook mode on Render")
     
-    # Keep the main thread alive for webhook mode
-    try:
-        while True:
-            await asyncio.sleep(30)
-            # Health check
+    # Start Flask webhook server
+    from flask import Flask, request
+    app = Flask(__name__)
+    
+    @app.route('/webhook', methods=['POST'])
+    def webhook():
+        """Handle webhook requests"""
+        try:
+            update_data = request.get_json(force=True)
+            if not update_data:
+                logger.warning("Received empty webhook data")
+                return 'OK'
+                
+            logger.info(f"Received webhook update: {update_data.get('update_id', 'unknown')}")
+            
             try:
-                me = await bot.bot.get_me()
-                logger.info(f"Bot health check: @{me.username} is alive")
+                update = Update.de_json(update_data, bot.bot)
+                if update:
+                    # Handle the update in a new thread to avoid blocking
+                    def process_update():
+                        try:
+                            loop = asyncio.new_event_loop()
+                            asyncio.set_event_loop(loop)
+                            loop.run_until_complete(bot.application.process_update(update))
+                            loop.close()
+                        except Exception as e:
+                            logger.error(f"Error processing update in thread: {e}")
+                    
+                    thread = threading.Thread(target=process_update, daemon=True)
+                    thread.start()
+                    
             except Exception as e:
-                logger.error(f"Bot health check failed: {e}")
-    except KeyboardInterrupt:
-        logger.info("Bot stopped by user")
-        await bot.application.stop()
+                logger.error(f"Error creating update object: {e}")
+                
+            return 'OK', 200
+            
+        except Exception as e:
+            logger.error(f"Webhook error: {e}")
+            return 'Error', 500
+    
+    @app.route('/', methods=['GET'])
+    def home():
+        """Home page for Render deployment"""
+        return '''
+        <!DOCTYPE html>
+        <html>
+        <head>
+            <title>Pixabay Search Bot - Render Only</title>
+            <meta charset="UTF-8">
+            <style>
+                body { font-family: Arial, sans-serif; text-align: center; padding: 50px; background: #f0f2f5; }
+                .container { max-width: 600px; margin: 0 auto; background: white; padding: 30px; border-radius: 10px; box-shadow: 0 2px 10px rgba(0,0,0,0.1); }
+                h1 { color: #2c3e50; }
+                .ascii { font-family: monospace; white-space: pre; margin: 20px 0; }
+                .feature { margin: 10px 0; padding: 10px; background: #ecf0f1; border-radius: 5px; }
+                .status { color: #27ae60; font-weight: bold; }
+                .platform { color: #8e44ad; font-weight: bold; margin: 10px 0; }
+            </style>
+        </head>
+        <body>
+            <div class="container">
+                <h1>🤖 Pixabay Search Bot</h1>
+                <div class="ascii">   (•_•)  
+          <)   )╯  
+           /   \\  
+        🎧 | Running on Render Only!</div>
+                
+                <div class="status">✅ Bot Status: Online</div>
+                <div class="platform">🚀 Deployed on Render.com</div>
+                <div class="platform">🔗 Webhook: https://telegram-oihp.onrender.com/webhook</div>
+                
+                <h3>Features:</h3>
+                <div class="feature">🔍 Multi-media Search (Photos, Videos, Music, GIFs)</div>
+                <div class="feature">📢 Mandatory Channel Subscription</div>
+                <div class="feature">⬅️➡️ Navigate Between Results</div>
+                <div class="feature">🔧 Admin Panel (Ban/Unban, Statistics, Broadcasting)</div>
+                <div class="feature">📊 User Analytics & Search Tracking</div>
+                
+                <p>Find the bot on Telegram and send <code>/start</code> to begin!</p>
+            </div>
+        </body>
+        </html>
+        '''
+    
+    @app.route('/health', methods=['GET'])
+    def health():
+        """Health check endpoint"""
+        return 'OK'
+    
+    # Run Flask server
+    port = int(os.environ.get('PORT', 5000))
+    app.run(host='0.0.0.0', port=port, debug=False)
 
 if __name__ == '__main__':
-    asyncio.run(main())
+    if is_render_environment():
+        asyncio.run(main())
+    else:
+        print("❌ هذا البوت مخصص للعمل على Render.com فقط")
+        print("❌ يرجى نشر البوت على Render.com لاستخدامه")
