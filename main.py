@@ -1026,7 +1026,7 @@ def home():
     <!DOCTYPE html>
     <html>
     <head>
-        <title>Pixabay Search Bot</title>
+        <title>Pixabay Search Bot - Render Deployment</title>
         <meta charset="UTF-8">
         <style>
             body { font-family: Arial, sans-serif; text-align: center; padding: 50px; background: #f0f2f5; }
@@ -1035,6 +1035,7 @@ def home():
             .ascii { font-family: monospace; white-space: pre; margin: 20px 0; }
             .feature { margin: 10px 0; padding: 10px; background: #ecf0f1; border-radius: 5px; }
             .status { color: #27ae60; font-weight: bold; }
+            .platform { color: #8e44ad; font-weight: bold; margin: 10px 0; }
         </style>
     </head>
     <body>
@@ -1043,9 +1044,11 @@ def home():
             <div class="ascii">   (•_•)  
   <)   )╯  
    /   \\  
-🎧 | Bot is Running!</div>
+🎧 | Bot is Running on Render!</div>
             
             <div class="status">✅ Bot Status: Online</div>
+            <div class="platform">🚀 Deployed on Render.com</div>
+            <div class="platform">🔗 Webhook: https://telegram-oihp.onrender.com/webhook</div>
             
             <h3>Features:</h3>
             <div class="feature">🔍 Multi-media Search (Photos, Videos, Music, GIFs)</div>
@@ -1144,136 +1147,71 @@ async def set_webhook_manually(webhook_url: str):
         return False
 
 async def main():
-    """Main function"""
+    """Main function - Render deployment only"""
     # Set up signal handlers
     signal.signal(signal.SIGINT, signal_handler)
     signal.signal(signal.SIGTERM, signal_handler)
     
-    # Check if we're on Render or other cloud platform
-    render_url = os.environ.get('RENDER_EXTERNAL_URL')
-    port = os.environ.get('PORT')
+    # Force Render webhook mode only
+    logger.info("Starting bot in webhook mode for Render deployment")
     
-    # If PORT is set, we're likely on a cloud platform like Render
-    if port:
-        # Production webhook mode on cloud platform
-        logger.info("Starting bot in webhook mode for cloud deployment")
-        
-        # Start Flask server for webhook handling
-        flask_thread = threading.Thread(target=run_flask, daemon=True)
-        flask_thread.start()
-        
-        # Wait for Flask to start
-        await asyncio.sleep(3)
-        
-        # Use the configured webhook URL
-        webhook_url = "https://telegram-oihp.onrender.com/webhook"
-        
-        # Initialize bot first
-        await bot.bot.initialize()
-        await bot.application.initialize()
-        
-        max_retries = 5
-        for attempt in range(max_retries):
-            try:
-                # Delete existing webhook first
-                await bot.bot.delete_webhook()
-                await asyncio.sleep(1)
-                
-                # Set new webhook
-                result = await bot.bot.set_webhook(
-                    url=webhook_url,
-                    allowed_updates=["message", "callback_query", "inline_query"]
-                )
-                
-                if result:
-                    logger.info(f"✅ Webhook set successfully: {webhook_url}")
-                    break
-                else:
-                    logger.error(f"❌ Failed to set webhook: {webhook_url}")
-                    
-            except Exception as e:
-                if attempt < max_retries - 1:
-                    logger.warning(f"Webhook setup attempt {attempt + 1} failed: {e}. Retrying in 10 seconds...")
-                    await asyncio.sleep(10)
-                else:
-                    logger.error(f"Failed to set webhook after {max_retries} attempts: {e}")
-                    logger.info("Falling back to polling mode...")
-                    port = None
-                    break
-        
-        if port:
-            await bot.application.start()
-            logger.info("🚀 Bot started successfully in webhook mode")
+    # Start Flask server for webhook handling
+    flask_thread = threading.Thread(target=run_flask, daemon=True)
+    flask_thread.start()
+    
+    # Wait for Flask to start
+    await asyncio.sleep(3)
+    
+    # Use the hardcoded Render webhook URL
+    webhook_url = "https://telegram-oihp.onrender.com/webhook"
+    
+    # Initialize bot first
+    await bot.bot.initialize()
+    await bot.application.initialize()
+    
+    max_retries = 5
+    for attempt in range(max_retries):
+        try:
+            # Delete existing webhook first
+            await bot.bot.delete_webhook()
+            await asyncio.sleep(1)
             
-            # Keep the main thread alive for webhook mode
-            try:
-                while True:
-                    await asyncio.sleep(30)
-                    # Health check
-                    try:
-                        me = await bot.bot.get_me()
-                        logger.info(f"Bot health check: @{me.username} is alive")
-                    except Exception as e:
-                        logger.error(f"Bot health check failed: {e}")
-            except KeyboardInterrupt:
-                logger.info("Bot stopped by user")
-                await bot.application.stop()
-                return
+            # Set new webhook
+            result = await bot.bot.set_webhook(
+                url=webhook_url,
+                allowed_updates=["message", "callback_query", "inline_query"]
+            )
+            
+            if result:
+                logger.info(f"✅ Webhook set successfully: {webhook_url}")
+                break
+            else:
+                logger.error(f"❌ Failed to set webhook: {webhook_url}")
+                
+        except Exception as e:
+            if attempt < max_retries - 1:
+                logger.warning(f"Webhook setup attempt {attempt + 1} failed: {e}. Retrying in 10 seconds...")
+                await asyncio.sleep(10)
+            else:
+                logger.error(f"Failed to set webhook after {max_retries} attempts: {e}")
+                break
     
-    # Local development or fallback polling mode
-    logger.info("Starting bot in polling mode...")
+    await bot.application.start()
+    logger.info("🚀 Bot started successfully in webhook mode on Render")
+    
+    # Keep the main thread alive for webhook mode
     try:
-        # Delete webhook first
-        await bot.bot.delete_webhook()
-        # Start Flask server for health checks
-        flask_thread = threading.Thread(target=run_flask, daemon=True)
-        flask_thread.start()
-        logger.info("Flask server started for health checks")
-        
-        # Initialize bot and application properly
-        await bot.bot.initialize()
-        await bot.application.initialize()
-        await bot.application.start()
-        
-        logger.info("Bot polling started successfully")
-        
-        # Start polling for updates
         while True:
+            await asyncio.sleep(30)
+            # Health check
             try:
-                updates = await bot.bot.get_updates(
-                    offset=getattr(bot, '_last_update_id', 0) + 1,
-                    timeout=30
-                )
-                
-                for update in updates:
-                    bot._last_update_id = update.update_id
-                    try:
-                        await bot.application.process_update(update)
-                    except Exception as e:
-                        logger.error(f"Error processing update {update.update_id}: {e}")
-                        # Continue processing other updates
-                
-                if not updates:
-                    await asyncio.sleep(1)
-                    
+                me = await bot.bot.get_me()
+                logger.info(f"Bot health check: @{me.username} is alive")
             except Exception as e:
-                logger.error(f"Error in polling loop: {e}")
-                await asyncio.sleep(5)
-                
+                logger.error(f"Bot health check failed: {e}")
     except KeyboardInterrupt:
         logger.info("Bot stopped by user")
-    except Exception as e:
-        logger.error(f"Critical error in polling mode: {e}")
-        # Start Flask server anyway for health checks
-        flask_thread = threading.Thread(target=run_flask, daemon=True)
-        flask_thread.start()
-        
-        # Keep alive
-        try:
-            while True:
-                await asyncio.sleep(10)
-        except KeyboardInterrupt:
-            logger.info("Bot stopped")
+        await bot.application.stop()
 
 if __name__ == '__main__':
     asyncio.run(main())
