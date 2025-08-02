@@ -81,7 +81,7 @@ The application follows a monolithic architecture with the following key compone
 - **Admin ID**: 7251748706
 - **Pixabay API Key**: 51444506-bffefcaf12816bd85a20222d1
 - **Database**: SQLite file stored locally
-- **Default Channel**: @Ili8_8ill (pre-configured)
+- **Default Channels**: None (admin must configure mandatory channels)
 
 # Deployment Strategy
 

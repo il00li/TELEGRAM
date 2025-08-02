@@ -357,7 +357,7 @@ class TelegramBot:
         ascii_art = """   (•_•)  
   <)   )╯  
    /   \\  
-🎧 | اشترك في القنوات اولا [@Ili8_8ill]"""
+🎧 | اشترك في القنوات اولا"""
         
         # Create keyboard with channel buttons
         keyboard = []
@@ -987,10 +987,4 @@ async def main():
             logger.info("Bot stopped")
 
 if __name__ == '__main__':
-    # Add default mandatory channel
-    try:
-        db.add_mandatory_channel("@Ili8_8ill", "Ili8_8ill", ADMIN_ID)
-    except:
-        pass
-    
     asyncio.run(main())
