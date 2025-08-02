@@ -1179,10 +1179,8 @@ async def main():
     
     # Check if we're in webhook mode (production deployment)
     render_url = os.environ.get('RENDER_EXTERNAL_URL') or "telegram-oihp.onrender.com"
-    railway_url = os.environ.get('RAILWAY_STATIC_URL')
-    replit_url = os.environ.get('REPL_SLUG')
     
-    use_webhook = bool(render_url or railway_url)
+    use_webhook = bool(render_url)
     
     if use_webhook:
         # Production webhook mode
@@ -1192,13 +1190,8 @@ async def main():
         # Wait for Flask to start
         await asyncio.sleep(3)
         
-        # Determine the correct webhook URL
-        if render_url:
-            webhook_url = f"https://{render_url}/webhook"
-        elif railway_url:
-            webhook_url = f"https://{railway_url}/webhook"
-        else:
-            webhook_url = f"https://{replit_url}.replit.app/webhook"
+        # Use Render webhook URL
+        webhook_url = f"https://{render_url}/webhook"
         
         # Initialize bot first
         await bot.bot.initialize()
